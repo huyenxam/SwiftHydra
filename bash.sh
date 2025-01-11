@@ -1,1 +1,0 @@
-python main.py >> training_output.log
