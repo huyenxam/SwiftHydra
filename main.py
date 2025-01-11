@@ -78,7 +78,8 @@ Xtrain_1 = D_train[yD_train.squeeze() == 1]
 Xtrain_0 = D_train[yD_train.squeeze() == 0]
 ytrain_1, ytrain_0 = [1] * len(Xtrain_1), [0] * len(Xtrain_0)
 
-# VAE traning
+
+# VAE Model
 encoder = Encoder(input_dim = Xtrain_1.shape[1], hidden_dim = 256, latent_dim = 64)
 decoder = Decoder(input_dim = 64, latent_dim = 256, hidden_dim = 256, output_dim=Xtrain_1.shape[1])
 encoder.apply(init_weights)
@@ -92,7 +93,7 @@ encoder = vae_model.Encoder
 decoder = vae_model.Decoder
 
 
-# Mamba traning
+# Mamba Model
 detector_model = MambaNet(Xtrain_1.shape[1])
 detector_model.to(device)
 optimizer_fc = Adam([{'params': detector_model.parameters()}], lr=5e-4)
@@ -114,37 +115,42 @@ for i in range(100):
         Xtrain_0_balanced = Xtrain_0
         ytrain_0_balanced = ytrain_0
 
-    # Combine the balanced datasets for training
-    Xtrain_balanced = torch.cat([Xtrain_1, Xtrain_0_balanced], dim=0)
-    ytrain_balanced = torch.tensor(ytrain_1 + ytrain_0_balanced).float().unsqueeze(1).to(device)
+    # Combine the balanced datasets (both classes) for training
+    Xtrain_balanced = torch.cat([Xtrain_1, Xtrain_0_balanced], dim=0) 
+    ytrain_balanced = torch.tensor(ytrain_1 + ytrain_0_balanced).float().unsqueeze(1).to(device) 
+
+    # Prepare DataLoader for the VAE training dataset (positive class)
+    ytrain_1 = torch.tensor(ytrain_1).float().unsqueeze(1).to(device) 
+    vae_dataset = TensorDataset(Xtrain_1, ytrain_1)  
+    vae_loader = DataLoader(vae_dataset, batch_size=BATCH_SIZE, shuffle=True)  
+
+    # Prepare DataLoader for the negative class dataset
+    ytrain_0 = torch.tensor(ytrain_0).float().unsqueeze(1).to(device)  
+    sample_dataset = TensorDataset(Xtrain_0, ytrain_0)  
+    sample_loader = DataLoader(sample_dataset, batch_size=BATCH_SIZE, shuffle=True)
+
+    # Prepare DataLoader for the combined detector dataset (balanced classes)
+    detector_dataset = TensorDataset(Xtrain_balanced, ytrain_balanced) 
+    detector_loader = DataLoader(detector_dataset, batch_size=BATCH_SIZE, shuffle=True) 
+
+    # Prepare DataLoader for testing dataset
+    test_dataset = TensorDataset(D_test, yD_test)  
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True) 
 
 
-    # Chuẩn bị DataLoader cho dữ liệu cân bằng
-    ytrain_1 = torch.tensor(ytrain_1).float().unsqueeze(1).to(device)  # Đảm bảo kích thước phù hợp
-    vae_dataset  = TensorDataset(Xtrain_1, ytrain_1)
-    vae_loader  = DataLoader(vae_dataset, batch_size=BATCH_SIZE, shuffle=True)
-    
-    ytrain_0 = torch.tensor(ytrain_0).float().unsqueeze(1).to(device)
-    sample_dataset  = TensorDataset(Xtrain_0, ytrain_0)
-    sample_loader  = DataLoader(sample_dataset, batch_size=BATCH_SIZE, shuffle=True)
-
-    detector_dataset  = TensorDataset(Xtrain_balanced, ytrain_balanced)
-    detector_loader  = DataLoader(detector_dataset, batch_size=BATCH_SIZE, shuffle=True)
-
-    test_dataset  = TensorDataset(D_test, yD_test)
-    test_loader  = DataLoader(test_dataset, batch_size=1, shuffle=True)
-
-
-    ##################### VAE Model ###############################
+    ##################### VAE Model #########################
     for param in vae_model.parameters():
         param.requires_grad = True
     encoder = vae_model.Encoder
     decoder = vae_model.Decoder
 
-    num_epochs_vae = 800
+    # Initialize a list to store latent space representations (z-values)
     z_density = []
-    for epoch in range(num_epochs_vae):
+    
+    # Training loop for VAE
+    for epoch in range(NUM_EPOCHS_VAE):
         z_density = []
+        
         for batch_idx, data_pair in enumerate(vae_loader):
             x = data_pair[0].float().to(device)
             optimizer_vae.zero_grad()
@@ -153,26 +159,15 @@ for i in range(100):
             z_density.extend(z.cpu().detach().numpy().tolist())
             total_loss, re_loss, KL_loss = loss_vae(x, x_hat, mean, log_var)     
             total = total_loss.sum() / BATCH_SIZE  
-            re = re_loss.sum() / BATCH_SIZE  
-            # logging.info(f"Epoch {epoch}, Batch {batch_idx}: Total Loss = {total.item():.2f}, "
-            #  f"Reproduction Loss = {re.item():.2f}, KL Divergence = {KL_loss.mean().item():.2f}, "
-            #  f"Latent Mean = {mean.mean().item():.2f}")
+            re = re_loss.sum() / BATCH_SIZE 
+             
+            logging.info(f"Epoch {epoch}, Batch {batch_idx}: Total Loss = {total.item():.2f}, "
+                         f"Reproduction Loss = {re.item():.2f}, KL Divergence = {KL_loss.mean().item():.2f}, "
+                         f"Latent Mean = {mean.mean().item():.2f}")
 
-
-            # print(f"Epoch {epoch}, Batch {batch_idx}: Total Loss = {total.item():.2f}, Reproduction Loss = {re.item():.2f}, KL Divergence = {KL_loss.mean().item():.2f}, Latent Mean = {mean.mean().item():.2f}")
-            
             total.backward()
             optimizer_vae.step()
             
-
-    # print("Explore feasible action ...................")
-    # kde = KernelDensity(kernel='gaussian', bandwidth=0.5)
-    # kde.fit(np.array(z_density))
-    # z_samples = np.array(z_density) # Lấy mẫu từ không gian tiềm ẩn
-    # log_density = kde.score_samples(z_samples)  # Log của mật độ xác suất
-    # density = np.exp(log_density)  # Chuyển đổi về mật độ xác suất
-    # entropy_value = entropy(density) # Tính entropy
-    # print(f"Entropy: {entropy_value:.4f}")
     
     for param in vae_model.parameters():
         param.requires_grad = False
@@ -181,12 +176,11 @@ for i in range(100):
     encoder = vae_model.Encoder
     decoder = vae_model.Decoder
     
-    ##################### Detector Model ###############################
+    ##################### Detector Model #############################
     for param in detector_model.parameters():
             param.requires_grad = True
 
-    num_epochs_FC = 400
-    for epoch in range(num_epochs_FC):
+    for epoch in range(NUM_EPOCHS_DETECTOR):
         epoch_loss = 0
         for batch_idx, data_pair in enumerate(detector_loader):
             x = data_pair[0].float().to(device)
@@ -203,27 +197,24 @@ for i in range(100):
             epoch_loss += loss.item()
 
     evaluate_model(test_loader, detector_model, device)
-    print(Xtrain_1.shape)
-    time.sleep(5)  
     
     for param in detector_model.parameters():
         param.requires_grad = False
 
 
-    ##################### Explore ###############################
+    ##################### Explore ######################
+    
     for sample_idx in range(100):
-        # Lấy mẫu dữ liệu từ train_loader
         data_iter = iter(vae_loader)
         batch_data = next(data_iter)[0].to(device)
         random_sample_idx = random.randint(0, batch_data.size(0) - 1)
 
-        # Encode dữ liệu để lấy mean, log_var và latent vector z_sample
         mean_latent, log_var_latent, z_sample = encoder(batch_data[random_sample_idx].unsqueeze(0).to(device))
 
         z_sample = z_sample.detach()
         z_sample.requires_grad = True
         z_optimizer = Adam([z_sample], lr=5e-4)
-        target_label = torch.zeros(1).to(device)  # Nhãn mục tiêu
+        target_label = torch.zeros(1).to(device)  
 
         updated_latent = deepcopy(z_sample)
         x_hat = None
@@ -234,7 +225,6 @@ for i in range(100):
             lower_bound = mean_latent.cpu().detach().numpy() - 3 * std_dev
             upper_bound = mean_latent.cpu().detach().numpy() + 3 * std_dev
 
-            # Kiểm tra z_sample có nằm trong khoảng hợp lệ không
             lower_bound_tensor = torch.tensor(lower_bound, device=z_sample.device)
             upper_bound_tensor = torch.tensor(upper_bound, device=z_sample.device)
             is_in_valid_range = ((z_sample.cpu() >= lower_bound_tensor.cpu()) & (z_sample.cpu() <= upper_bound_tensor.cpu())).all().item()
@@ -246,16 +236,14 @@ for i in range(100):
             temp_density_data.extend(z_sample.cpu().detach().numpy().tolist())
             updated_latent = deepcopy(z_sample)
 
-            # # Ước lượng mật độ và tính entropy
-            # kde_estimator = KernelDensity(kernel='gaussian', bandwidth=0.5)
-            # kde_estimator.fit(np.array(temp_density_data))
-            # latent_samples = np.array(temp_density_data)
-            # log_density_values = kde_estimator.score_samples(latent_samples)
-            # density_values = np.exp(log_density_values)
-            # entropy_score = entropy(density_values)
+            kde_estimator = KernelDensity(kernel='gaussian', bandwidth=0.5)
+            kde_estimator.fit(np.array(temp_density_data))
+            latent_samples = np.array(temp_density_data)
+            log_density_values = kde_estimator.score_samples(latent_samples)
+            density_values = np.exp(log_density_values)
+            entropy_score = entropy(density_values)
             
             
-            # Decode z_sample để dự đoán đầu ra
             reconstructed_sample = decoder(z_sample)            
             predicted_label = detector_model(reconstructed_sample)
             if predicted_label.item() >  0.2:
@@ -263,25 +251,18 @@ for i in range(100):
                 break
             
             loss_value = F.mse_loss(predicted_label, target_label) 
-            # logging.info(f"Step {sample_idx}, Iter {iteration}: Loss = {loss_value.item():.5f}, z_sample = {z_sample.detach().cpu().numpy()}")
-            
-            # print(f"Step {sample_idx}, Iter {iteration}: Loss = {loss.item():.5f}, Entropy: {entropy_score:.4f}, z_sample = {z_sample.detach().cpu().numpy()}")
-            
+            logging.info(f"Step {sample_idx}, Iter {iteration}: Loss = {loss_value.item():.5f}, z_sample = {z_sample.detach().cpu().numpy()}")
+                        
             loss_value.backward()
             z_optimizer.step()
 
         if x_hat is not None and x_hat.squeeze(0).shape[0] == Xtrain_1.shape[1]:
-            x_hat = x_hat.clone().detach().requires_grad_(True).squeeze(0).unsqueeze(0).to(Xtrain_1.device)  # Đưa về cùng thiết bị
-            Xtrain_1 = torch.cat((Xtrain_1, x_hat), dim=0)  # Nối tensor mới vào Xtrain_1
+            x_hat = x_hat.clone().detach().requires_grad_(True).squeeze(0).unsqueeze(0).to(Xtrain_1.device) 
+            Xtrain_1 = torch.cat((Xtrain_1, x_hat), dim=0)  
 
-            # Đảm bảo `new_label` có dạng (1, 1) giống `ytrain_1`
-            new_label = torch.tensor([[1]]).float().to(ytrain_1.device)  # Tạo tensor với đúng số chiều
-            ytrain_1 = torch.cat((ytrain_1, new_label), dim=0).clone().detach().requires_grad_(True)  # Nối tensor
+            new_label = torch.tensor([[1]]).float().to(ytrain_1.device)  
+            ytrain_1 = torch.cat((ytrain_1, new_label), dim=0).clone().detach().requires_grad_(True) 
 
 
         z_density.extend(updated_latent.cpu().detach().numpy().tolist())
 
-
-    
-
-# python main.py >> training_output.log
