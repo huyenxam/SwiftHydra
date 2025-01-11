@@ -203,7 +203,7 @@ for i in range(100):
 
     ##################### Explore ######################
     
-    for sample_idx in range(100):
+    for sample_idx in range(NUM_GEN_DATA):
         data_iter = iter(vae_loader)
         batch_data = next(data_iter)[0].to(device)
         random_sample_idx = random.randint(0, batch_data.size(0) - 1)
@@ -217,7 +217,7 @@ for i in range(100):
 
         updated_latent = deepcopy(z_sample)
         x_hat = None
-        for iteration in range(200):
+        for iteration in range(NUM_EPISODES):
             temp_density_data = deepcopy(z_density)
             variance = np.exp(log_var_latent.cpu().detach().numpy())
             std_dev = np.sqrt(variance)
