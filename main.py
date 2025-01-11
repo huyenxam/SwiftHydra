@@ -12,11 +12,8 @@ warnings.filterwarnings('ignore')
 import random
 from scipy.stats import entropy
 from sklearn.neighbors import KernelDensity
-import sklearn.metrics as skm
-from tqdm import tqdm
 from copy import deepcopy
 from utils import *
-import time
 import logging
 
 # Cấu hình logging
@@ -168,7 +165,7 @@ for i in range(100):
             total.backward()
             optimizer_vae.step()
             
-    
+
     for param in vae_model.parameters():
         param.requires_grad = False
     for param in detector_model.parameters():
@@ -176,7 +173,9 @@ for i in range(100):
     encoder = vae_model.Encoder
     decoder = vae_model.Decoder
     
+    
     ##################### Detector Model #############################
+    
     for param in detector_model.parameters():
             param.requires_grad = True
 
@@ -242,8 +241,7 @@ for i in range(100):
             log_density_values = kde_estimator.score_samples(latent_samples)
             density_values = np.exp(log_density_values)
             entropy_score = entropy(density_values)
-            
-            
+             
             reconstructed_sample = decoder(z_sample)            
             predicted_label = detector_model(reconstructed_sample)
             if predicted_label.item() >  0.2:
